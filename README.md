@@ -6,21 +6,17 @@
 
 ## 安装
 
-需要 Node.js 20 及以上。
+1. 到 [Releases](https://github.com/RedwindA/cursor-repo-qa/releases/latest) 下载最新的 `cursor-repo-qa-vX.Y.Z.zip` 并解压。
+2. Chrome 打开 `chrome://extensions`，打开右上角“开发者模式”。
+3. 点“加载已解压的扩展程序”，选择解压出来的文件夹（里面直接有 `manifest.json`）。
+4. 安装后会自动打开设置页：粘贴 Cursor User API Key（在 https://cursor.com/dashboard/api 创建），点“保存并测试”。
+5. 打开任意 GitHub 仓库页面，右下角会出现圆形按钮。
 
-```bash
-npm install
-npm run build
-```
+Edge、Brave 等 Chromium 内核浏览器同样适用（需要 Chrome 116 及以上内核）。
 
-1. Chrome 打开 `chrome://extensions`，打开右上角“开发者模式”。
-2. 点“加载已解压的扩展程序”，选择构建出来的 `dist/` 目录。
-3. 安装后会自动打开设置页：粘贴 Cursor User API Key（在 https://cursor.com/dashboard/api 创建），点“保存并测试”。
-4. 打开任意 GitHub 仓库页面，右下角会出现圆形按钮。
+升级：下载新版 zip 解压覆盖原来的文件夹，然后在 `chrome://extensions` 点扩展的“重新加载”。从 1.0 升级时，旧的问答记录会自动迁移到聊天记录里。
 
-也可以在 GitHub Actions 的 `build` 任务里直接下载构建好的 `dist/`。Edge、Brave 等 Chromium 内核浏览器同样适用（需要 Chrome 116 及以上内核）。
-
-从 1.0 升级：重新构建后在 `chrome://extensions` 点扩展的“重新加载”，旧的问答记录会自动迁移到聊天记录里。
+想自己构建（需要 Node.js 20 及以上）：`npm install && npm run build`，然后加载 `dist/` 目录。
 
 ## 使用
 
@@ -56,6 +52,8 @@ npm run watch      # 监听修改并增量构建到 dist/
 npm run typecheck  # TypeScript 类型检查
 npm run icons      # 重新生成用到的 Octicons
 ```
+
+发布新版本：`npm version patch --no-git-tag-version`（或 `minor` / `major`），把改过的 `package.json` 和 `package-lock.json` 合进 `main`。GitHub Actions 发现这个版本还没有 Release，就会自动构建、打 `vX.Y.Z` 标签，并把 zip 发到 Releases。版本号没变的推送只构建，不发布。
 
 | 路径 | 作用 |
 | --- | --- |

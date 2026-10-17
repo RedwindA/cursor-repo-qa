@@ -3,10 +3,13 @@ name: build
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,7 +19,47 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+
+      # zip 里直接是 manifest.json 等文件，解压出来的文件夹就能“加载已解压的扩展程序”
+      - name: 打包 zip
+        id: pack
+        run: |
+          version=$(node -p "require('./package.json').version")
+          zip_name="cursor-repo-qa-v${version}.zip"
+          (cd dist && zip -qr "../${zip_name}" .)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "zip=${zip_name}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         with:
           name: cursor-repo-qa-extension
           path: dist/
+
+      # 默认分支上，package.json 的版本还没有对应 Release 时自动发布
+      - name: 发布 Release
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.pack.outputs.version }}
+          ZIP: ${{ steps.pack.outputs.zip }}
+        run: |
+          tag="v${VERSION}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag 已存在，跳过。要发新版本请先改 package.json 的 version。"
+            exit 0
+          fi
+          cat > notes.md <<EOF
+          ## 安装
+
+          1. 下载下方的 \`${ZIP}\` 并解压。
+          2. Chrome 打开 \`chrome://extensions\`，打开右上角“开发者模式”。
+          3. 点“加载已解压的扩展程序”，选择解压出来的文件夹（里面直接有 \`manifest.json\`）。
+
+          从旧版本升级：解压覆盖原来的文件夹，然后在 \`chrome://extensions\` 点扩展的“重新加载”。
+
+          EOF
+          gh release create "$tag" "$ZIP" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes-file notes.md \
+            --generate-notes
