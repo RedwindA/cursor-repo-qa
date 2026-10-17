@@ -6,10 +6,12 @@
 //   chat:<id>                              一段会话（Conversation）
 //   active:<owner/name 小写>               该仓库在浮窗里当前打开的会话 id
 
-import type { Conversation, Language, RepoRef, Settings } from "./types";
+import type { Conversation, Language, ModelInfo, RepoRef, Settings } from "./types";
 
 export const DEFAULT_API_BASE = "https://api.cursor.com";
 export const MAX_MESSAGES = 80;
+export const MODEL_CACHE_KEY = "modelCache";
+export const MODEL_CACHE_TTL = 6 * 3600 * 1000;
 
 const CHAT_PREFIX = "chat:";
 const ACTIVE_PREFIX = "active:";
@@ -33,6 +35,24 @@ export async function getSettings(): Promise<Settings> {
     language: (s.language as Language) || "zh",
     apiBase: String(s.apiBase || DEFAULT_API_BASE).replace(/\/+$/, ""),
   };
+}
+
+// ---------- 模型列表缓存 ----------
+
+export interface ModelCache {
+  ts: number;
+  models: ModelInfo[];
+}
+
+export async function getModelCache(): Promise<ModelCache | null> {
+  const got = await local().get(MODEL_CACHE_KEY);
+  const c = got[MODEL_CACHE_KEY] as ModelCache | undefined;
+  return c && Array.isArray(c.models) ? c : null;
+}
+
+export function modelLabel(id: string, cache: ModelCache | null): string {
+  if (!id) return "默认模型";
+  return cache?.models.find((m) => m.id === id)?.displayName || id;
 }
 
 // ---------- 会话 ----------
@@ -78,6 +98,7 @@ export function normalizeConversation(raw: unknown): Conversation | null {
     updatedAt: c.updatedAt || messages[messages.length - 1]?.ts || Date.now(),
     agentId: c.agentId || null,
     agentUrl: c.agentUrl || "",
+    ...(typeof c.agentModel === "string" ? { agentModel: c.agentModel } : {}),
     messages: messages.map((m) => (m.role === "assistant" ? { ...m, activity: m.activity || [] } : m)),
     pending: c.pending || null,
   };

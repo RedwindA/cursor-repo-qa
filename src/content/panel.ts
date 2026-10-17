@@ -1,9 +1,10 @@
 // 浮窗界面（Shadow DOM 内）
 import { fillAssistant, renderChatMessage, statusText, type ChatViewOptions } from "../shared/chat-view";
-import { h, icon, isolateKeys } from "../shared/dom";
+import { h, icon, isolateKeys, spinner } from "../shared/dom";
 import { fmtRelative } from "../shared/format";
 import { bindCodeCopy } from "../shared/markdown";
-import type { Conversation } from "../shared/types";
+import { getModelCache, modelLabel, type ModelCache } from "../shared/storage";
+import type { Conversation, ModelInfo, RuntimeResponse } from "../shared/types";
 import css from "./panel.css?inline";
 import type { CurrentRepo } from "./repo";
 import { extAlive, type Session } from "./session";
@@ -20,6 +21,7 @@ export class Panel {
   private isOpen = sessionStorage.getItem(OPEN_KEY) === "1";
   private maximized = false;
   private model = "";
+  private modelCache: ModelCache | null = null;
   private rafIdx = new Set<number>();
   private rafAll = false;
   private rafId = 0;
@@ -39,11 +41,13 @@ export class Panel {
   private list = h("div", { class: "list", role: "log", "aria-live": "polite" });
   private toBottom = h("button", { type: "button", class: "to-bottom btn-octicon sm", title: "回到底部", "aria-label": "回到底部", hidden: true }, icon("arrow-down"));
   private input = h("textarea", { class: "composer-input", rows: 1, placeholder: "问点关于这个仓库的问题…", "aria-label": "问题" });
-  private modelBtn = h("button", { type: "button", class: "composer-model", title: "选择模型（在设置里修改）" }, icon("cpu"), h("span"));
+  private modelBtn = h("button", { type: "button", class: "composer-model", title: "切换模型", "aria-haspopup": "menu", "aria-expanded": "false" }, icon("cpu"), h("span"), icon("chevron-down", "composer-model-caret"));
+  private modelMenu = h("div", { class: "menu menu-model", role: "menu", "aria-label": "选择模型", hidden: true });
   private send = h("button", { type: "submit", class: "composer-send" });
   private composer = h(
     "form",
     { class: "composer" },
+    this.modelMenu,
     h("div", { class: "composer-box" }, this.input, h("div", { class: "composer-bar" }, this.modelBtn, h("span", { class: "composer-hint" }, h("kbd", null, "Enter"), " 发送 · ", h("kbd", null, "Shift+Enter"), " 换行"), this.send)),
   );
   private viewOpts: ChatViewOptions = { onOpenOptions: () => this.openOptions() };
@@ -117,21 +121,39 @@ export class Panel {
       this.autoGrow();
       this.refreshComposer();
     });
-    this.modelBtn.addEventListener("click", () => this.openOptions());
+    this.modelBtn.addEventListener("click", () => (this.modelMenu.hidden ? this.openModelMenu() : this.closeModelMenu()));
 
     this.panel.addEventListener("keydown", (e) => {
-      if (e.key !== "Escape") return;
-      if (!this.menu.hidden) this.closeMenu();
-      else this.toggle(false);
+      const open = !this.menu.hidden ? this.menu : !this.modelMenu.hidden ? this.modelMenu : null;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (open === this.modelMenu) {
+          this.closeModelMenu();
+          this.modelBtn.focus();
+        } else if (open) {
+          this.closeMenu();
+          this.btnHistory.focus();
+        } else this.toggle(false);
+      } else if (open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        // 菜单里用上下键移动
+        e.preventDefault();
+        const items = [...open.querySelectorAll<HTMLElement>(".menu-item:not([hidden])")];
+        if (!items.length) return;
+        const i = items.indexOf(this.shadowActive() as HTMLElement);
+        const next = e.key === "ArrowDown" ? (i + 1) % items.length : (i <= 0 ? items.length : i) - 1;
+        items[next].focus();
+      }
     });
     // 点菜单外面关闭菜单
     this.wrap.addEventListener("pointerdown", (e) => {
-      if (this.menu.hidden) return;
       const path = e.composedPath();
-      if (!path.includes(this.menu) && !path.includes(this.btnHistory)) this.closeMenu();
+      if (!this.menu.hidden && !path.includes(this.menu) && !path.includes(this.btnHistory)) this.closeMenu();
+      if (!this.modelMenu.hidden && !path.includes(this.modelMenu) && !path.includes(this.modelBtn)) this.closeModelMenu();
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!this.menu.hidden && !e.composedPath().includes(this.host)) this.closeMenu();
+      if (e.composedPath().includes(this.host)) return;
+      this.closeMenu();
+      this.closeModelMenu();
     });
   }
 
@@ -151,6 +173,7 @@ export class Panel {
       setTimeout(() => this.input.focus(), 0);
     } else {
       this.closeMenu();
+      this.closeModelMenu();
       this.fab.focus({ preventScroll: true });
     }
   }
@@ -255,11 +278,12 @@ export class Panel {
     try {
       const { model } = await chrome.storage.local.get("model");
       this.model = String(model || "");
+      this.modelCache = await getModelCache();
     } catch {
       this.model = "";
     }
-    const label = this.modelBtn.lastElementChild!;
-    label.textContent = this.model || "默认模型";
+    this.modelBtn.querySelector("span")!.textContent = modelLabel(this.model, this.modelCache);
+    this.modelBtn.title = `模型：${this.model || "默认（跟随 Cursor 设置）"}。点击切换`;
   }
 
   onChange(repoKey: string, msgIndex?: number): void {
@@ -418,6 +442,7 @@ export class Panel {
     }
     const repo = this.repo;
     if (!repo) return;
+    this.closeModelMenu();
     const chats = await this.session.listForRepo(repo.key);
     const current = this.session.get(repo.key);
     const items = chats.slice(0, 30).map((c) => {
@@ -463,5 +488,114 @@ export class Panel {
   private closeMenu(): void {
     this.menu.hidden = true;
     this.btnHistory.setAttribute("aria-expanded", "false");
+  }
+
+  private shadowActive(): Element | null {
+    return (this.host.shadowRoot as ShadowRoot).activeElement;
+  }
+
+  // ---------- 模型菜单 ----------
+
+  private async openModelMenu(refresh = false): Promise<void> {
+    this.closeMenu();
+    this.modelMenu.hidden = false;
+    this.modelBtn.setAttribute("aria-expanded", "true");
+    if (refresh || !this.modelCache) this.renderModelMenu(null, "loading");
+    else this.renderModelMenu(this.modelCache.models);
+    if (!extAlive()) {
+      this.renderModelMenu(null, "扩展已更新或重新加载，请刷新页面。");
+      return;
+    }
+    const res: RuntimeResponse<{ models: ModelInfo[] }> = await chrome.runtime
+      .sendMessage({ type: "listModels", cached: !refresh })
+      .catch((e: Error) => ({ ok: false, error: { code: "", status: 0, message: e.message } }));
+    if (this.modelMenu.hidden) return;
+    if (!res?.ok) {
+      // 有旧列表就继续用，只在没有列表时显示错误
+      if (!this.modelCache || refresh) this.renderModelMenu(this.modelCache?.models || null, res?.error?.message || "获取模型列表失败");
+      return;
+    }
+    this.modelCache = { ts: Date.now(), models: res.models };
+    this.renderModelMenu(res.models);
+  }
+
+  private closeModelMenu(): void {
+    this.modelMenu.hidden = true;
+    this.modelBtn.setAttribute("aria-expanded", "false");
+  }
+
+  private renderModelMenu(models: ModelInfo[] | null, state?: string): void {
+    const keepFilter = this.modelMenu.querySelector<HTMLInputElement>(".menu-filter input")?.value || "";
+    const refreshBtn = h(
+      "button",
+      { type: "button", class: "btn-octicon xs", title: "刷新模型列表", "aria-label": "刷新模型列表", disabled: state === "loading", onclick: () => this.openModelMenu(true) },
+      icon("sync"),
+    );
+    const parts: Node[] = [h("div", { class: "menu-header" }, h("span", null, "选择模型"), refreshBtn)];
+
+    const item = (id: string, title: string, desc: string, mono = true) => {
+      const active = id === this.model;
+      return h(
+        "button",
+        {
+          type: "button",
+          class: "menu-item" + (active ? " active" : ""),
+          role: "menuitemradio",
+          "aria-checked": active ? "true" : "false",
+          dataset: { filter: `${title} ${id}`.toLowerCase() },
+          onclick: () => this.pickModel(id),
+        },
+        h("span", { class: "menu-check" }, active ? icon("check") : null),
+        h("span", { class: "menu-text" }, h("span", { class: "menu-title" }, title), desc ? h("span", { class: mono ? "menu-desc mono" : "menu-desc" }, desc) : null),
+      );
+    };
+
+    const list = h("div", { class: "menu-list" }, item("", "默认模型", "跟随 Cursor 里的设置", false));
+    if (models) {
+      for (const m of models) list.appendChild(item(m.id, m.displayName, m.displayName === m.id ? "" : m.id));
+      if (this.model && !models.some((m) => m.id === this.model)) list.appendChild(item(this.model, this.model, "当前设置（已不在列表中）", false));
+    }
+    if (models && models.length > 8) {
+      const filter = h("input", { type: "text", class: "form-control", placeholder: "筛选模型…", "aria-label": "筛选模型", value: keepFilter });
+      const apply = () => {
+        const q = filter.value.trim().toLowerCase();
+        for (const b of list.querySelectorAll<HTMLElement>(".menu-item")) b.hidden = !!q && !b.dataset.filter!.includes(q);
+      };
+      filter.addEventListener("input", apply);
+      filter.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          list.querySelector<HTMLElement>(".menu-item:not([hidden])")?.click();
+        }
+      });
+      parts.push(h("div", { class: "menu-filter" }, filter));
+      apply();
+    }
+    parts.push(list);
+    if (state === "loading") parts.push(h("div", { class: "menu-state" }, spinner(16), "正在获取模型列表…"));
+    else if (state) parts.push(h("div", { class: "menu-state error" }, icon("alert"), state));
+
+    const conv = this.repo ? this.session.get(this.repo.key) : undefined;
+    if (conv?.agentId) {
+      parts.push(h("div", { class: "menu-divider" }), h("div", { class: "menu-note" }, icon("info"), "云端会话创建后不能换模型。切换后，下一个问题会新开云端会话，并带上最近的对话。"));
+    }
+    this.modelMenu.replaceChildren(...parts);
+    const focusTarget = this.modelMenu.querySelector<HTMLElement>(".menu-filter input") || this.modelMenu.querySelector<HTMLElement>(".menu-item.active");
+    if (!state || state !== "loading") focusTarget?.focus();
+    this.modelMenu.querySelector(".menu-item.active")?.scrollIntoView({ block: "nearest" });
+  }
+
+  private async pickModel(id: string): Promise<void> {
+    this.closeModelMenu();
+    this.input.focus();
+    if (id === this.model) return;
+    if (this.repo) this.session.rememberAgentModel(this.repo.key, this.model);
+    this.model = id;
+    this.modelBtn.querySelector("span")!.textContent = modelLabel(id, this.modelCache);
+    try {
+      await chrome.storage.local.set({ model: id });
+    } catch {
+      /* 扩展上下文失效 */
+    }
   }
 }

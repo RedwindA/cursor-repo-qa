@@ -67,6 +67,8 @@ export interface Conversation {
   updatedAt: number;
   agentId: string | null;
   agentUrl: string;
+  /** 创建云端 agent 时用的模型（"" 表示默认）。追问不能换模型，换了就得新开 agent */
+  agentModel?: string;
   messages: ChatMessage[];
   pending: PendingRun | null;
 }
@@ -121,7 +123,7 @@ export interface Me {
 export type RuntimeRequest =
   | { type: "openOptions"; hash?: string }
   | { type: "testKey"; apiKey?: string }
-  | { type: "listModels"; apiKey?: string }
+  | { type: "listModels"; apiKey?: string; /** 允许用缓存（浮窗里用） */ cached?: boolean }
   | { type: "archive"; agentId: string };
 
 export type RuntimeResponse<T = unknown> = ({ ok: true } & T) | { ok: false; error: FriendlyError };

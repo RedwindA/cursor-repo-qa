@@ -1,6 +1,6 @@
 // Cursor 仓库问答 —— 后台 service worker
 // 负责调用 Cursor Cloud Agents API、读取 SSE 流并转发给页面里的浮窗。
-import { getSettings, migrateLegacy } from "../shared/storage";
+import { getModelCache, getSettings, migrateLegacy, MODEL_CACHE_KEY, MODEL_CACHE_TTL, type ModelCache } from "../shared/storage";
 import type { HistoryItem, Me, ModelInfo, PortRequest, RepoRef, RuntimeRequest, RuntimeResponse, Settings } from "../shared/types";
 import { api, friendlyError } from "./api";
 import { firstPrompt, followUpPrompt } from "./prompts";
@@ -92,7 +92,8 @@ chrome.runtime.onConnect.addListener((port) => {
       case "ask": {
         const { reqId, repo, question, pageUrl, agentId, history } = msg;
         run(reqId, async (settings) => {
-          if (!agentId) return createAgent(settings, repo, question, pageUrl, null);
+          // 新会话，或换了模型需要新开 agent（这时 history 里带着最近的对话）
+          if (!agentId) return createAgent(settings, repo, question, pageUrl, history.length ? history : null);
           try {
             return await createRun(settings, agentId, repo, question, pageUrl);
           } catch (e) {
@@ -140,8 +141,14 @@ async function handle(msg: RuntimeRequest): Promise<RuntimeResponse<Record<strin
       return { ok: true, me };
     }
     if (msg.type === "listModels") {
+      if (msg.cached && !msg.apiKey) {
+        const cache = await getModelCache();
+        if (cache && Date.now() - cache.ts < MODEL_CACHE_TTL) return { ok: true, models: cache.models };
+      }
       const res = await api<{ items?: { id: string; displayName?: string }[] }>({ ...settings, apiKey: (msg.apiKey ?? settings.apiKey).trim() }, "GET", "/v1/models");
       const models: ModelInfo[] = (res?.items || []).map((m) => ({ id: m.id, displayName: m.displayName || m.id }));
+      const cache: ModelCache = { ts: Date.now(), models };
+      await chrome.storage.local.set({ [MODEL_CACHE_KEY]: cache });
       return { ok: true, models };
     }
     if (msg.type === "archive") {

@@ -136,7 +136,7 @@ export function settingsView(): HTMLElement {
   });
 
   root.append(
-    subhead("模型", { desc: "留空就用你在 Cursor 里设置的默认模型。只是读代码回答问题，选便宜一点的模型更省额度。" }),
+    subhead("模型", { desc: "留空就用你在 Cursor 里设置的默认模型。只是读代码回答问题，选便宜一点的模型更省额度。也可以直接在浮窗输入框左下角切换。" }),
     h(
       "div",
       { class: "form-group" },
@@ -168,6 +168,14 @@ export function settingsView(): HTMLElement {
   });
 
   root.append(subhead("回答语言"), radios);
+
+  // 浮窗里切换了模型：同步到下拉框
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.model) return;
+    const id = String(changes.model.newValue || "");
+    if (id && ![...modelSel.options].some((o) => o.value === id)) modelSel.add(new Option(id, id));
+    modelSel.value = id;
+  });
 
   // ---------- 初始值 ----------
 

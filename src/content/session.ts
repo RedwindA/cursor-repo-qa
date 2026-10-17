@@ -105,6 +105,15 @@ export class Session {
     return null;
   }
 
+  /** 浮窗里切换模型前调用：给旧会话记下 agent 当时的模型，换模型后追问才会新开 agent */
+  rememberAgentModel(repoKey: string, previous: string): void {
+    const conv = this.convs.get(repoKey);
+    if (conv?.agentId && conv.agentModel === undefined) {
+      conv.agentModel = previous;
+      this.save(repoKey, true);
+    }
+  }
+
   get busy(): boolean {
     return this.runs.size > 0;
   }
@@ -131,6 +140,16 @@ export class Session {
     question = question.trim();
     if (!question || this.running(repo.key)) return;
     const conv = await this.load(repo);
+    let model = "";
+    try {
+      model = String((await chrome.storage.local.get("model")).model || "");
+    } catch {
+      /* 扩展上下文失效，下面 post 会失败 */
+    }
+    // 追问不能换模型：会话的 agent 用的模型和当前选择不同，就新开一个 agent（带上最近的对话）
+    if (conv.agentId && conv.agentModel === undefined) conv.agentModel = model;
+    const switching = !!conv.agentId && conv.agentModel !== model;
+    if (switching && extAlive()) chrome.runtime.sendMessage({ type: "archive", agentId: conv.agentId }).catch(() => {});
     // 只保留最近的消息（成对裁剪；此时这个仓库没有进行中的运行，下标不会错位）
     if (conv.messages.length > MAX_MESSAGES - 2) conv.messages = conv.messages.slice(-(MAX_MESSAGES - 2));
 
@@ -141,7 +160,14 @@ export class Session {
 
     const now = Date.now();
     conv.messages.push({ role: "user", text: question, ts: now, pageUrl });
-    conv.messages.push({ role: "assistant", text: "", status: "running", activity: [], ts: now });
+    conv.messages.push({
+      role: "assistant",
+      text: "",
+      status: "running",
+      activity: [],
+      ts: now,
+      ...(switching ? { note: `已切换到${model ? ` ${model}` : "默认模型"}，新开了云端会话（带上了最近的对话）。` } : {}),
+    });
     if (!conv.title) conv.title = titleFrom(question);
     const msgIndex = conv.messages.length - 1;
     const reqId = ++this.reqSeq;
@@ -156,7 +182,7 @@ export class Session {
       repo: { owner: repo.owner, name: repo.name },
       question,
       pageUrl,
-      agentId: conv.agentId,
+      agentId: switching ? null : conv.agentId,
       history,
     });
     if (!ok) this.fail(reqId, RELOAD_HINT);
@@ -280,6 +306,7 @@ export class Session {
         if (msg.agentUrl) conv.agentUrl = msg.agentUrl;
         m.agentUrl = conv.agentUrl || "";
         if (msg.model) m.model = msg.model;
+        if (msg.isNewAgent) conv.agentModel = msg.model;
         if (msg.recreated) m.note = "之前的云端会话已失效，已开启新会话（带上了最近的对话）。";
         conv.pending = { agentId: msg.agentId, runId: msg.runId, msgIndex: a.msgIndex };
         this.save(a.repoKey, true);
