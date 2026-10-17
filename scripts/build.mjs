@@ -1,41 +1,45 @@
 // 构建扩展到 dist/：node scripts/build.mjs [--watch]
 import * as esbuild from "esbuild";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
-const out = root + "dist";
+// 用 fileURLToPath / path.join 处理路径，Windows 上才不会出现 /I:/... 这样的路径
+const root = fileURLToPath(new URL("..", import.meta.url));
+const at = (...p) => join(root, ...p);
+const out = at("dist");
 const watch = process.argv.includes("--watch");
-const pkg = JSON.parse(readFileSync(root + "package.json", "utf8"));
+const pkg = JSON.parse(readFileSync(at("package.json"), "utf8"));
 
 // `import css from "./x.css?inline"`：把 CSS（含 @import）打包、压缩成字符串
 const inlineCss = {
   name: "inline-css",
   setup(build) {
     build.onResolve({ filter: /\.css\?inline$/ }, (args) => ({
-      path: new URL(args.path.replace(/\?inline$/, ""), "file://" + args.resolveDir + "/").pathname,
+      path: resolve(args.resolveDir, args.path.replace(/\?inline$/, "")),
       namespace: "inline-css",
     }));
     build.onLoad({ filter: /.*/, namespace: "inline-css" }, async (args) => {
-      const r = await esbuild.build({ entryPoints: [args.path], bundle: true, minify: true, write: false, logLevel: "silent" });
-      return { contents: r.outputFiles[0].text, loader: "text", watchFiles: Object.keys(r.metafile?.inputs || {}).concat(args.path) };
+      const r = await esbuild.build({ entryPoints: [args.path], bundle: true, minify: true, write: false, metafile: true, logLevel: "silent" });
+      return { contents: r.outputFiles[0].text, loader: "text", watchFiles: Object.keys(r.metafile.inputs).map((f) => resolve(f)) };
     });
   },
 };
 
 function copyStatic() {
   mkdirSync(out, { recursive: true });
-  cpSync(root + "public", out, { recursive: true });
-  const manifest = JSON.parse(readFileSync(root + "src/manifest.json", "utf8"));
+  cpSync(at("public"), out, { recursive: true });
+  const manifest = JSON.parse(readFileSync(at("src", "manifest.json"), "utf8"));
   manifest.version = pkg.version;
-  writeFileSync(out + "/manifest.json", JSON.stringify(manifest, null, 2));
+  writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2));
 }
 
 const options = {
   entryPoints: {
-    background: root + "src/background/index.ts",
-    content: root + "src/content/index.ts",
-    options: root + "src/options/index.ts",
-    "options-style": root + "src/options/options.css",
+    background: at("src", "background", "index.ts"),
+    content: at("src", "content", "index.ts"),
+    options: at("src", "options", "index.ts"),
+    "options-style": at("src", "options", "options.css"),
   },
   outdir: out,
   bundle: true,
