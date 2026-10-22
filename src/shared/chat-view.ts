@@ -45,7 +45,9 @@ export function statusText(m: AssistantMessage): string {
   if (m.stopping) return `正在停止… ${elapsed}`;
   const steps = m.activity?.length || 0;
   if (m.backend === "local") {
-    if (!m.runStatus || m.runStatus === "FETCHING_REPO") return `正在准备仓库代码… ${elapsed}`;
+    if (m.runStatus === "DOWNLOADING") return `正在下载仓库代码… ${elapsed}`;
+    if (m.runStatus === "FETCHING_REPO") return `正在加载仓库代码… ${elapsed}`;
+    if (!m.runStatus) return `正在准备… ${elapsed}`;
     if (steps) return `正在阅读代码 · 已执行 ${steps} 步 · ${elapsed}`;
     return `正在思考… ${elapsed}`;
   }

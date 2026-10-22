@@ -4,8 +4,10 @@
 //   zip 的注释就是 commit SHA（git archive 的行为），所以下载完就知道具体版本。
 // - 填了 GitHub token 时走 api.github.com 的 zipball，私有仓库也能读。
 // - zip 原样缓存在 IndexedDB（按 commit 区分，超过容量按最近使用淘汰），同一 commit 不重复下载。
+//   打开时只解析 zip 的目录，文件用到时才解压，所以 service worker 被回收后重新打开也很快。
 // - 仓库太大（zip 超过上限）时退回“远程模式”：目录树用 Git Trees API，文件按需读取。
-import { unzipSync } from "fflate";
+//   目录树同样按 commit 缓存，并记住这个仓库太大，之后不再尝试下载 zip。
+import { inflateSync, unzipSync } from "fflate";
 import type { RepoRef } from "../../shared/types";
 import { evict, idbGet, idbPut, touch } from "./idb";
 
@@ -14,6 +16,8 @@ const CACHE_MAX_BYTES = 512 * 1024 * 1024;
 /** 超过这个大小的文件只列出，不解压、不搜索 */
 export const MAX_FILE_BYTES = 1024 * 1024;
 const REF_TTL = 10 * 60 * 1000;
+/** 记住“这个仓库太大”多久，期间直接用远程模式 */
+const TOO_BIG_TTL = 7 * 24 * 3600 * 1000;
 
 export class RepoError extends Error {
   constructor(
@@ -27,12 +31,6 @@ export class RepoError extends Error {
 export interface FileEntry {
   path: string;
   size: number;
-}
-
-export interface GrepHit {
-  path: string;
-  line: number;
-  text: string;
 }
 
 /** agent 工具看到的仓库 */
@@ -59,6 +57,16 @@ const decoder = new TextDecoder();
 
 // ---------- zip 快照 ----------
 
+/** zip 里的一个文件：读取时再解压 */
+interface ZipEntry {
+  size: number;
+  /** 已解压的内容；还没解压时是 zip 里的位置 */
+  data?: Uint8Array;
+  method?: number;
+  csize?: number;
+  offset?: number;
+}
+
 class ZipFS implements RepoFS {
   readonly remote = false;
   private entries: FileEntry[];
@@ -66,40 +74,84 @@ class ZipFS implements RepoFS {
   constructor(
     readonly repo: RepoRef,
     readonly sha: string,
-    private data: Map<string, Uint8Array>,
-    sizes: Map<string, number>,
+    private zip: Uint8Array,
+    private index: Map<string, ZipEntry>,
   ) {
-    this.entries = [...sizes].map(([path, size]) => ({ path, size })).sort((a, b) => (a.path < b.path ? -1 : 1));
+    this.entries = [...index].map(([path, e]) => ({ path, size: e.size })).sort((a, b) => (a.path < b.path ? -1 : 1));
   }
 
   files(): FileEntry[] {
     return this.entries;
   }
 
+  private bytes(e: ZipEntry): Uint8Array {
+    if (e.data) return e.data;
+    const z = this.zip;
+    const at = e.offset!;
+    // 本地文件头：30 字节固定部分 + 文件名 + 扩展字段，之后是数据
+    const start = at + 30 + (z[at + 26] | (z[at + 27] << 8)) + (z[at + 28] | (z[at + 29] << 8));
+    const raw = z.subarray(start, start + e.csize!);
+    e.data = e.method === 0 ? raw : inflateSync(raw, { out: new Uint8Array(e.size) });
+    return e.data;
+  }
+
   async readText(path: string): Promise<string | null> {
-    const bytes = this.data.get(path);
-    if (!bytes) {
-      if (this.entries.some((e) => e.path === path)) return null; // 太大，没解压
-      throw new RepoError("not_found", `文件不存在：${path}`);
-    }
+    const e = this.index.get(path);
+    if (!e) throw new RepoError("not_found", `文件不存在：${path}`);
+    if (e.size > MAX_FILE_BYTES) return null;
+    const bytes = this.bytes(e);
     return isBinary(bytes) ? null : decoder.decode(bytes);
   }
 }
 
+const stripRoot = (name: string) => name.slice(name.indexOf("/") + 1);
+
+/** 读 zip 的中央目录建立索引（不解压）；遇到 zip64 等不支持的格式返回 null */
+function indexZip(zip: Uint8Array): Map<string, ZipEntry> | null {
+  const dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  let eocd = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 22 - 0xffff); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) return null;
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  if (count === 0xffff || p === 0xffffffff) return null;
+  const index = new Map<string, ZipEntry>();
+  for (let n = 0; n < count; n++) {
+    if (p + 46 > zip.length || dv.getUint32(p, true) !== 0x02014b50) return null;
+    const method = dv.getUint16(p + 10, true);
+    const csize = dv.getUint32(p + 20, true);
+    const size = dv.getUint32(p + 24, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const offset = dv.getUint32(p + 42, true);
+    if (csize === 0xffffffff || size === 0xffffffff || offset === 0xffffffff || (method !== 0 && method !== 8)) return null;
+    const name = decoder.decode(zip.subarray(p + 46, p + 46 + nameLen));
+    if (!name.endsWith("/")) index.set(stripRoot(name), { size, method, csize, offset });
+    p += 46 + nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+  }
+  index.delete("");
+  return index;
+}
+
 function openZip(repo: RepoRef, sha: string, zip: Uint8Array): ZipFS {
-  const sizes = new Map<string, number>();
-  const strip = (name: string) => name.slice(name.indexOf("/") + 1);
+  const index = indexZip(zip);
+  if (index) return new ZipFS(repo, sha, zip, index);
+  // 不常见的 zip 格式：整包解压
+  const eager = new Map<string, ZipEntry>();
   const unzipped = unzipSync(zip, {
     filter: (f) => {
       if (f.name.endsWith("/")) return false;
-      sizes.set(strip(f.name), f.originalSize);
+      eager.set(stripRoot(f.name), { size: f.originalSize });
       return f.originalSize <= MAX_FILE_BYTES;
     },
   });
-  const data = new Map<string, Uint8Array>();
-  for (const [name, bytes] of Object.entries(unzipped)) data.set(strip(name), bytes);
-  sizes.delete("");
-  return new ZipFS(repo, sha, data, sizes);
+  for (const [name, bytes] of Object.entries(unzipped)) eager.get(stripRoot(name))!.data = bytes;
+  eager.delete("");
+  return new ZipFS(repo, sha, zip, eager);
 }
 
 /** zip 末尾的 End of Central Directory 里的注释 */
@@ -215,10 +267,8 @@ async function openRemote(repo: RepoRef, ref: string, token: string, signal: Abo
 
 // ---------- 对外接口 ----------
 
-interface SnapshotRecord {
-  key: string;
-  zip: Uint8Array;
-}
+/** zip 快照，或大仓库的目录树 */
+type SnapshotRecord = { key: string; zip: Uint8Array } | { key: string; tree: FileEntry[]; truncated: boolean };
 
 interface RefRecord {
   key: string;
@@ -226,7 +276,7 @@ interface RefRecord {
   ts: number;
 }
 
-/** 最近用过的快照留在内存里（service worker 被回收后从 IndexedDB 重新解压） */
+/** 最近用过的快照留在内存里（service worker 被回收后从 IndexedDB 重新打开） */
 const memory = new Map<string, RepoFS>();
 const remember = (fs: RepoFS) => {
   const key = `${repoId(fs.repo)}@${fs.sha}`;
@@ -260,21 +310,36 @@ export function refCandidates(repo: RepoRef, pageUrl: string): string[] {
   return [1, 2, 3].filter((n) => n <= rest.length).map((n) => rest.slice(0, n).join("/"));
 }
 
-async function openRef(repo: RepoRef, ref: string, token: string, signal: AbortSignal): Promise<RepoFS> {
+async function cacheRemote(id: string, ref: string, known: string | null, fs: RemoteFS): Promise<void> {
+  try {
+    const key = `${id}@${fs.sha}`;
+    await idbPut<SnapshotRecord>("snapshots", { key, tree: fs.files(), truncated: fs.truncated });
+    await touch("snapshots", key, fs.files().length * 64);
+    if (!known) await idbPut<RefRecord>("refs", { key: `${id}@${ref}`, sha: fs.sha, ts: Date.now() });
+    await idbPut<RefRecord>("refs", { key: `${id}#too-big`, sha: "", ts: Date.now() });
+  } catch {
+    /* 缓存失败不影响这次使用 */
+  }
+}
+
+async function openRef(repo: RepoRef, ref: string, token: string, signal: AbortSignal, onDownload?: () => void): Promise<RepoFS> {
   const id = repoId(repo);
   // 同一个分支 10 分钟内直接用上次的 commit
   const known = /^[0-9a-f]{40}$/i.test(ref) ? ref.toLowerCase() : null;
   const cachedRef = known ? null : await idbGet<RefRecord>("refs", `${id}@${ref}`).catch(() => undefined);
   const sha = known || (cachedRef && Date.now() - cachedRef.ts < REF_TTL ? cachedRef.sha : null);
   if (sha) {
-    const fs = await openSha(repo, sha);
+    const fs = await openSha(repo, sha, token);
     if (fs) return fs;
   }
 
-  const zip = await downloadZip(repo, ref, token, signal);
+  onDownload?.();
+  // 之前发现这个仓库太大：不再下载 zip，直接用远程模式
+  const tooBig = await idbGet<RefRecord>("refs", `${id}#too-big`).catch(() => undefined);
+  const zip = tooBig && Date.now() - tooBig.ts < TOO_BIG_TTL ? null : await downloadZip(repo, ref, token, signal);
   if (!zip) {
     const fs = await openRemote(repo, ref, token, signal);
-    if (!known) await idbPut<RefRecord>("refs", { key: `${id}@${ref}`, sha: fs.sha, ts: Date.now() }).catch(() => {});
+    await cacheRemote(id, ref, known, fs);
     return remember(fs);
   }
   const zipSha = zipComment(zip).toLowerCase();
@@ -292,35 +357,38 @@ async function openRef(repo: RepoRef, ref: string, token: string, signal: AbortS
 }
 
 /** 按 commit 打开：内存 → IndexedDB；都没有返回 null */
-export async function openSha(repo: RepoRef, sha: string): Promise<RepoFS | null> {
+export async function openSha(repo: RepoRef, sha: string, token: string): Promise<RepoFS | null> {
   const key = `${repoId(repo)}@${sha}`;
   const inMem = memory.get(key);
   if (inMem) return remember(inMem);
   const rec = await idbGet<SnapshotRecord>("snapshots", key).catch(() => undefined);
   if (!rec) return null;
   touch("snapshots", key).catch(() => {});
-  return remember(openZip(repo, sha, rec.zip));
+  return remember("zip" in rec ? openZip(repo, sha, rec.zip) : new RemoteFS(repo, sha, rec.tree, token, rec.truncated));
 }
 
 /**
  * 打开仓库：pinnedSha 是会话之前用过的 commit（追问时沿用）；否则按页面地址找分支，找不到就用默认分支。
  */
-export async function openRepo(repo: RepoRef, opts: { pageUrl: string; pinnedSha?: string; token: string; signal: AbortSignal }): Promise<OpenResult> {
-  const { pageUrl, pinnedSha, token, signal } = opts;
+export async function openRepo(
+  repo: RepoRef,
+  opts: { pageUrl: string; pinnedSha?: string; token: string; signal: AbortSignal; onDownload?: () => void },
+): Promise<OpenResult> {
+  const { pageUrl, pinnedSha, token, signal, onDownload } = opts;
   if (pinnedSha) {
-    const fs = (await openSha(repo, pinnedSha)) || (await openRef(repo, pinnedSha, token, signal).catch(() => null));
+    const fs = (await openSha(repo, pinnedSha, token)) || (await openRef(repo, pinnedSha, token, signal, onDownload).catch(() => null));
     if (fs) return { fs };
   }
   const candidates = refCandidates(repo, pageUrl);
   for (const ref of candidates) {
     try {
-      return { fs: await openRef(repo, ref, token, signal) };
+      return { fs: await openRef(repo, ref, token, signal, onDownload) };
     } catch (e) {
       if (!(e instanceof RepoError) || e.code !== "not_found") throw e;
     }
   }
   try {
-    const fs = await openRef(repo, "HEAD", token, signal);
+    const fs = await openRef(repo, "HEAD", token, signal, onDownload);
     return { fs, note: candidates.length ? `页面上的分支（${candidates[0]}）没找到，用的是默认分支。` : undefined };
   } catch (e) {
     if (e instanceof RepoError && e.code === "not_found") {
