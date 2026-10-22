@@ -1,6 +1,6 @@
 {
   "name": "cursor-repo-qa",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "private": true,
   "description": "在 GitHub 仓库页面提问，由 AI agent 阅读仓库代码并回答（自带模型 API 或 Cursor Cloud Agent）。",
   "type": "module",

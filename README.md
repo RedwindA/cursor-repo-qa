@@ -9,17 +9,36 @@
 
 ## 安装
 
-1. 到 [Releases](https://github.com/RedwindA/repo-qa/releases/latest) 下载最新的 `cursor-repo-qa-vX.Y.Z.zip` 并解压。
+推荐用 git 安装：构建好的扩展在 `dist` 分支上，扩展的文件夹固定不变，以后更新只要 `git pull`，不用再下载 Release。
+
+1. 克隆 `dist` 分支：
+   ```bash
+   git clone --branch dist --depth 1 https://github.com/RedwindA/repo-qa.git repo-qa-extension
+   ```
 2. Chrome 打开 `chrome://extensions`，打开右上角“开发者模式”。
-3. 点“加载已解压的扩展程序”，选择解压出来的文件夹（里面直接有 `manifest.json`）。
+3. 点“加载已解压的扩展程序”，选择 `repo-qa-extension` 文件夹（里面直接有 `manifest.json`）。
 4. 安装后会自动打开设置页：
    - 本地 agent：点“添加模型服务”，选一个预设（OpenAI、Anthropic、DeepSeek、OpenRouter、Kimi、智谱、通义千问、硅基流动、Gemini、Ollama）或自定义地址，填 API key，点“保存并测试”。浏览器会询问是否允许扩展访问这个地址，选允许。然后在“模型”里选一个模型。
    - Cursor Cloud Agent：在“回答方式”里切换过去，粘贴 Cursor User API Key（在 https://cursor.com/dashboard/api 创建），点“保存并测试”。
 5. 打开任意 GitHub 仓库页面，右下角会出现圆形按钮。
 
+不想用 git 的话，也可以到 [Releases](https://github.com/RedwindA/repo-qa/releases/latest) 下载 zip，解压后按上面第 2、3 步加载。
+
 Edge、Brave 等 Chromium 内核浏览器同样适用（需要 Chrome 116 及以上内核）。
 
-升级：下载新版 zip 解压覆盖原来的文件夹，然后在 `chrome://extensions` 点扩展的“重新加载”。从 1.0 升级时，旧的问答记录会自动迁移到聊天记录里。
+### 更新
+
+```bash
+git -C repo-qa-extension pull
+```
+
+然后在设置页“使用说明”里点“重新加载扩展”（或在 `chrome://extensions` 点扩展的刷新图标）。有新版本时，设置页左侧会提示。
+
+从 1.3.0 起扩展有固定的 ID（manifest 里的 `key`），所以文件夹换了位置、重新加载也不会丢设置和聊天记录。
+
+**从 1.2.x 及更早版本升级（只需一次）**：之前的扩展 ID 是按文件夹路径算的，换成固定 ID 后算是另一个扩展，旧数据不会自动带过来。先在旧版本的“聊天记录”页导出 JSON，装好新版本后再导入；模型服务和 API key 需要重新填一次。确认没问题后再删除旧版本。
+
+从 1.0 升级时，旧的问答记录会自动迁移到聊天记录里。
 
 想自己构建（需要 Node.js 20 及以上）：`npm install && npm run build`，然后加载 `dist/` 目录。
 

@@ -51,11 +51,15 @@ jobs:
           cat > notes.md <<EOF
           ## 安装
 
-          1. 下载下方的 \`${ZIP}\` 并解压。
-          2. Chrome 打开 \`chrome://extensions\`，打开右上角“开发者模式”。
-          3. 点“加载已解压的扩展程序”，选择解压出来的文件夹（里面直接有 \`manifest.json\`）。
+          推荐用 git 安装，以后 \`git pull\` 就能更新，扩展文件夹不变：
 
-          从旧版本升级：解压覆盖原来的文件夹，然后在 \`chrome://extensions\` 点扩展的“重新加载”。
+          \`\`\`bash
+          git clone --branch dist --depth 1 https://github.com/${GITHUB_REPOSITORY}.git repo-qa-extension
+          \`\`\`
+
+          然后在 \`chrome://extensions\` 打开“开发者模式”，“加载已解压的扩展程序”选择这个文件夹。
+
+          也可以下载下方的 \`${ZIP}\`，解压后同样加载。从旧版本升级：解压覆盖原来的文件夹，然后在 \`chrome://extensions\` 点扩展的“重新加载”。
 
           EOF
           gh release create "$tag" "$ZIP" \
@@ -63,3 +67,31 @@ jobs:
             --title "$tag" \
             --notes-file notes.md \
             --generate-notes
+
+      # 把构建好的扩展提交到 dist 分支：clone 这个分支后直接“加载已解压的扩展程序”，
+      # 以后 git pull 就能更新，扩展所在的文件夹不变。只在版本号变化时提交。
+      - name: 更新 dist 分支
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          out=$(mktemp -d)
+          if git ls-remote --exit-code --heads "$remote" dist > /dev/null; then
+            git clone --quiet --branch dist --depth 1 "$remote" "$out"
+          else
+            git init --quiet -b dist "$out"
+            git -C "$out" remote add origin "$remote"
+          fi
+          old=$(node -p "try { require('$out/manifest.json').version } catch { '' }")
+          if [ "$old" = "$VERSION" ]; then
+            echo "dist 分支已经是 v${VERSION}，跳过。"
+            exit 0
+          fi
+          find "$out" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r dist/. "$out/"
+          git -C "$out" add -A
+          git -C "$out" -c user.name="github-actions[bot]" -c user.email="41898583+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "v${VERSION}（来自 ${GITHUB_SHA::7}）"
+          git -C "$out" push --quiet origin dist

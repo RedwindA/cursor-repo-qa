@@ -128,6 +128,9 @@ body[data-view="settings"] .layout, body[data-view="about"] .layout { max-width:
 .radio-item .form-caption { margin-top: 0; }
 
 .notes { margin: 0; padding-left: 20px; }
+.about-p { margin: 0 0 8px; }
+.cmd { margin: 0 0 12px; padding: 8px 12px; overflow-x: auto; font-family: var(--qa-font-mono); font-size: 12px; background: var(--qa-bg-muted); border: 1px solid var(--qa-border-muted); border-radius: var(--qa-radius); user-select: all; }
+.update-badge { display: inline-block; margin-top: 4px; text-decoration: none; }
 .notes li + li { margin-top: 6px; }
 
 .tip { display: flex; gap: 12px; }
