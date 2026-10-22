@@ -20,6 +20,11 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
+/** 估算费用：$0.0123 / $1.23 */
+export function fmtCost(usd: number): string {
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
 const dateFmt = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 const shortDateFmt = new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" });
 const timeFmt = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" });

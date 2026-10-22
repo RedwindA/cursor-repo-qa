@@ -1,17 +1,21 @@
 // chrome.storage.local 的读写封装
 //
 // 存储结构：
-//   apiKey / model / language / apiBase   设置
+//   backend                                用哪个后端：local（自带模型 API）/ cursor
+//   providers / localModel / githubToken   本地 agent 的模型服务、所选模型、GitHub token
+//   apiKey / model / apiBase               Cursor Cloud Agent 的 key 和模型
+//   language                               回答语言
 //   panelSize                              浮窗尺寸
 //   chat:<id>                              一段会话（Conversation）
 //   active:<owner/name 小写>               该仓库在浮窗里当前打开的会话 id
 
-import type { Conversation, Language, ModelInfo, RepoRef, Settings } from "./types";
+import type { Backend, Conversation, Language, LlmProvider, ModelInfo, RepoRef, Settings } from "./types";
 
 export const DEFAULT_API_BASE = "https://api.cursor.com";
 export const MAX_MESSAGES = 80;
-export const MODEL_CACHE_KEY = "modelCache";
 export const MODEL_CACHE_TTL = 6 * 3600 * 1000;
+/** 这些键变了，浮窗要刷新模型和提示 */
+export const SETTINGS_KEYS = ["backend", "apiKey", "model", "localModel", "providers"];
 
 const CHAT_PREFIX = "chat:";
 const ACTIVE_PREFIX = "active:";
@@ -27,13 +31,48 @@ const local = () => chrome.storage.local;
 
 // ---------- 设置 ----------
 
+/** 没选过后端时：设置过 Cursor key 的老用户继续用 Cursor，其余用本地 agent */
+const backendOf = (s: Record<string, unknown>): Backend => (s.backend === "cursor" || s.backend === "local" ? s.backend : s.apiKey ? "cursor" : "local");
+
+/** 两个后端的模型分开保存，切换后端不会互相覆盖 */
+export const modelKey = (backend: Backend) => (backend === "local" ? "localModel" : "model");
+
+export async function getBackend(): Promise<Backend> {
+  return backendOf(await local().get(["backend", "apiKey"]));
+}
+
+/** 当前后端和它选中的模型 */
+export async function getBackendModel(): Promise<{ backend: Backend; model: string }> {
+  const s = await local().get(["backend", "apiKey", "model", "localModel"]);
+  const backend = backendOf(s);
+  return { backend, model: String(s[modelKey(backend)] || "") };
+}
+
+export function normalizeProviders(raw: unknown): LlmProvider[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((p) => p && typeof p === "object" && p.id)
+    .map((p) => ({
+      id: String(p.id),
+      name: String(p.name || p.id),
+      kind: p.kind === "anthropic" ? "anthropic" : "openai",
+      baseUrl: String(p.baseUrl || "").trim().replace(/\/+$/, ""),
+      apiKey: String(p.apiKey || "").trim(),
+      models: Array.isArray(p.models) ? p.models.map(String).filter(Boolean) : [],
+    }));
+}
+
 export async function getSettings(): Promise<Settings> {
-  const s = await local().get(["apiKey", "model", "language", "apiBase"]);
+  const s = await local().get(["backend", "apiKey", "model", "localModel", "language", "apiBase", "providers", "githubToken"]);
+  const backend = backendOf(s);
   return {
+    backend,
     apiKey: String(s.apiKey || "").trim(),
-    model: String(s.model || ""),
+    model: String(s[modelKey(backend)] || ""),
     language: (s.language as Language) || "zh",
     apiBase: String(s.apiBase || DEFAULT_API_BASE).replace(/\/+$/, ""),
+    providers: normalizeProviders(s.providers),
+    githubToken: String(s.githubToken || "").trim(),
   };
 }
 
@@ -44,14 +83,17 @@ export interface ModelCache {
   models: ModelInfo[];
 }
 
-export async function getModelCache(): Promise<ModelCache | null> {
-  const got = await local().get(MODEL_CACHE_KEY);
-  const c = got[MODEL_CACHE_KEY] as ModelCache | undefined;
+export const modelCacheKey = (backend: Backend) => (backend === "local" ? "localModelCache" : "modelCache");
+
+export async function getModelCache(backend: Backend): Promise<ModelCache | null> {
+  const k = modelCacheKey(backend);
+  const got = await local().get(k);
+  const c = got[k] as ModelCache | undefined;
   return c && Array.isArray(c.models) ? c : null;
 }
 
-export function modelLabel(id: string, cache: ModelCache | null): string {
-  if (!id) return "默认模型";
+export function modelLabel(id: string, cache: ModelCache | null, backend: Backend = "cursor"): string {
+  if (!id) return backend === "local" ? "选择模型" : "默认模型";
   return cache?.models.find((m) => m.id === id)?.displayName || id;
 }
 

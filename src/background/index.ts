@@ -1,8 +1,11 @@
 // Cursor 仓库问答 —— 后台 service worker
-// 负责调用 Cursor Cloud Agents API、读取 SSE 流并转发给页面里的浮窗。
-import { getModelCache, getSettings, migrateLegacy, MODEL_CACHE_KEY, MODEL_CACHE_TTL, type ModelCache } from "../shared/storage";
-import type { HistoryItem, Me, ModelInfo, PortRequest, RepoRef, RuntimeRequest, RuntimeResponse, Settings } from "../shared/types";
+// 两个后端：本地 agent（local/，在这里跑 agent 循环，调用自己配置的模型 API），
+// 或 Cursor Cloud Agents API（读取 SSE 流）。结果都按同样的消息格式转发给页面里的浮窗。
+import { getModelCache, getSettings, migrateLegacy, MODEL_CACHE_TTL, modelCacheKey, type ModelCache } from "../shared/storage";
+import type { Backend, HistoryItem, Me, ModelInfo, PortRequest, RepoRef, RuntimeRequest, RuntimeResponse, Settings } from "../shared/types";
 import { api, friendlyError } from "./api";
+import { isLocalId, localArchive, localAsk, localCancel, localResume } from "./local/agent";
+import { listLocalModels, listProviderModels } from "./local/models";
 import { firstPrompt, followUpPrompt } from "./prompts";
 import { followRun, type Emit, type RunTask } from "./stream";
 
@@ -42,11 +45,15 @@ async function createRun(settings: Settings, agentId: string, repo: RepoRef, que
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT_NAME) return;
   const tasks = new Map<string, RunTask>(); // runId -> task
+  // 本地 run 不随浮窗断开而停止，只取消订阅
+  const unsubs = new Set<() => void>();
   let alive = true;
   port.onDisconnect.addListener(() => {
     alive = false;
     for (const t of tasks.values()) t.controller.abort();
     tasks.clear();
+    for (const u of unsubs) u();
+    unsubs.clear();
   });
 
   const post = (msg: object) => {
@@ -72,6 +79,7 @@ chrome.runtime.onConnect.addListener((port) => {
         runId: task.runId,
         agentUrl: started.agentUrl || "",
         model: settings.model,
+        backend: "cursor",
         isNewAgent: !!started.isNewAgent,
         recreated: !!started.recreated,
       });
@@ -91,9 +99,16 @@ chrome.runtime.onConnect.addListener((port) => {
 
       case "ask": {
         const { reqId, repo, question, pageUrl, agentId, history } = msg;
+        const settings = await getSettings();
+        if (settings.backend === "local") {
+          const unsub = await localAsk(settings, { repo, question, pageUrl, agentId, history }, (m) => post({ reqId, ...m }));
+          if (alive) unsubs.add(unsub);
+          else unsub();
+          return;
+        }
         run(reqId, async (settings) => {
-          // 新会话，或换了模型需要新开 agent（这时 history 里带着最近的对话）
-          if (!agentId) return createAgent(settings, repo, question, pageUrl, history.length ? history : null);
+          // 新会话、换了模型需要新开 agent，或之前是本地 agent 的会话（这时 history 里带着最近的对话）
+          if (!agentId || isLocalId(agentId)) return createAgent(settings, repo, question, pageUrl, history.length ? history : null);
           try {
             return await createRun(settings, agentId, repo, question, pageUrl);
           } catch (e) {
@@ -109,10 +124,15 @@ chrome.runtime.onConnect.addListener((port) => {
       }
 
       case "resume":
+        if (isLocalId(msg.runId)) {
+          unsubs.add(localResume(msg.runId, msg.lastEventId, (m) => post({ reqId: msg.reqId, ...m })));
+          return;
+        }
         run(msg.reqId, async () => ({ agentId: msg.agentId, runId: msg.runId }), msg.lastEventId);
         return;
 
       case "cancel": {
+        if (isLocalId(msg.runId)) return localCancel(msg.runId);
         const settings = await getSettings();
         try {
           await api(settings, "POST", `/v1/agents/${encodeURIComponent(msg.agentId)}/runs/${encodeURIComponent(msg.runId)}/cancel`);
@@ -140,19 +160,35 @@ async function handle(msg: RuntimeRequest): Promise<RuntimeResponse<Record<strin
       const me = await api<Me>({ ...settings, apiKey: (msg.apiKey ?? settings.apiKey).trim() }, "GET", "/v1/me");
       return { ok: true, me };
     }
+    if (msg.type === "testProvider") {
+      const models = await listProviderModels(msg.provider, AbortSignal.timeout(15000));
+      return { ok: true, count: models.length };
+    }
     if (msg.type === "listModels") {
+      const backend: Backend = settings.backend;
       if (msg.cached && !msg.apiKey) {
-        const cache = await getModelCache();
+        const cache = await getModelCache(backend);
         if (cache && Date.now() - cache.ts < MODEL_CACHE_TTL) return { ok: true, models: cache.models };
       }
-      const res = await api<{ items?: { id: string; displayName?: string }[] }>({ ...settings, apiKey: (msg.apiKey ?? settings.apiKey).trim() }, "GET", "/v1/models");
-      const models: ModelInfo[] = (res?.items || []).map((m) => ({ id: m.id, displayName: m.displayName || m.id }));
+      let models: ModelInfo[];
+      let warning = "";
+      if (backend === "local") {
+        if (!settings.providers.length) return { ok: false, error: { code: "no_key", status: 0, message: "还没有配置模型服务，请先在设置里添加。" } };
+        const r = await listLocalModels(settings.providers);
+        if (!r.models.length && r.errors.length) return { ok: false, error: { code: "list_failed", status: 0, message: r.errors.join("；") } };
+        models = r.models;
+        warning = r.errors.join("；");
+      } else {
+        const res = await api<{ items?: { id: string; displayName?: string }[] }>({ ...settings, apiKey: (msg.apiKey ?? settings.apiKey).trim() }, "GET", "/v1/models");
+        models = (res?.items || []).map((m) => ({ id: m.id, displayName: m.displayName || m.id }));
+      }
       const cache: ModelCache = { ts: Date.now(), models };
-      await chrome.storage.local.set({ [MODEL_CACHE_KEY]: cache });
-      return { ok: true, models };
+      await chrome.storage.local.set({ [modelCacheKey(backend)]: cache });
+      return { ok: true, models, warning };
     }
     if (msg.type === "archive") {
-      await api(settings, "POST", `/v1/agents/${encodeURIComponent(msg.agentId)}/archive`);
+      if (isLocalId(msg.agentId)) await localArchive(msg.agentId);
+      else await api(settings, "POST", `/v1/agents/${encodeURIComponent(msg.agentId)}/archive`);
       return { ok: true };
     }
     return { ok: false, error: { code: "unknown", status: 0, message: "unknown message" } };
@@ -171,7 +207,7 @@ chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
 chrome.runtime.onInstalled.addListener(async (details) => {
   await migrateLegacy().catch(() => {});
   if (details.reason === "install") {
-    const { apiKey } = await chrome.storage.local.get("apiKey");
-    if (!apiKey) chrome.runtime.openOptionsPage();
+    const { apiKey, providers } = await chrome.storage.local.get(["apiKey", "providers"]);
+    if (!apiKey && !(Array.isArray(providers) && providers.length)) chrome.runtime.openOptionsPage();
   }
 });

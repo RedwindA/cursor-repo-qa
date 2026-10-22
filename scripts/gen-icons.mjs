@@ -7,7 +7,7 @@ const NAMES = {
     "comment-discussion", "copy", "download", "eye", "eye-closed", "file", "file-directory", "gear", "globe",
     "history", "info", "key", "kebab-horizontal", "link-external", "mark-github", "paper-airplane", "plus",
     "repo", "search", "sparkle-fill", "square-fill", "stop", "sync", "terminal", "tools", "trash", "x", "x-circle",
-    "screen-full", "screen-normal", "cpu", "comment",
+    "screen-full", "screen-normal", "cpu", "comment", "pencil", "server",
   ],
   24: ["comment-discussion", "history", "key", "sparkle-fill"],
 };

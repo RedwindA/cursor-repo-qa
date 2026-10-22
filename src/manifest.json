@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Cursor 仓库问答",
-  "description": "在 GitHub 仓库页面提问，由 Cursor Cloud Agent 克隆仓库、阅读代码并回答。",
+  "description": "在 GitHub 仓库页面提问，由 AI agent 阅读仓库代码并回答。支持自带模型 API（OpenAI 兼容 / Anthropic）或 Cursor Cloud Agent。",
   "version": "0.0.0",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "unlimitedStorage"],
-  "host_permissions": ["https://api.cursor.com/*"],
+  "host_permissions": ["https://api.cursor.com/*", "https://codeload.github.com/*", "https://api.github.com/*", "https://raw.githubusercontent.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "background.js"
   },

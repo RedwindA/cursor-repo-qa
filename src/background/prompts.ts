@@ -1,7 +1,7 @@
 // 发给 agent 的提示词
 import type { HistoryItem, Language, RepoRef } from "../shared/types";
 
-function languageInstruction(lang: Language): string {
+export function languageInstruction(lang: Language): string {
   if (lang === "en") return "answer in English";
   if (lang === "auto") return "使用与用户提问相同的语言回答";
   return "使用简体中文回答";
