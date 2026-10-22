@@ -108,6 +108,17 @@ body[data-view="settings"] .layout, body[data-view="about"] .layout { max-width:
 .account-text { flex: 1; min-width: 0; }
 .account-name { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 
+.provider-list { max-width: 640px; margin: 0 0 16px; }
+.provider-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.provider-url { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.provider-actions { display: flex; flex: none; gap: 4px; }
+.provider-editor { max-width: 640px; margin: 0 0 16px; }
+.provider-editor-title { margin: 0 0 16px; font-size: 14px; font-weight: 600; }
+.provider-editor .form-control { width: 100%; max-width: 440px; }
+.provider-editor .select-wrap { width: 100%; max-width: 440px; }
+.backend-section > .Subhead:first-child { margin-top: 40px; }
+.backend-section[hidden], .form-actions[hidden] { display: none; }
+
 .radio-group { margin: 0; padding: 0; border: 0; }
 .radio-item { display: flex; align-items: flex-start; gap: 8px; }
 .radio-item + .radio-item { margin-top: 12px; }

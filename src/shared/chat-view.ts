@@ -1,6 +1,6 @@
 // 会话消息的渲染。浮窗和「聊天记录」页共用。
 import { h, icon, spinner } from "./dom";
-import { fmtClock, fmtDateTime, fmtDuration, fmtTime, fmtTokens } from "./format";
+import { fmtClock, fmtCost, fmtDateTime, fmtDuration, fmtTime, fmtTokens } from "./format";
 import { copyText, flashCopied, renderMarkdown } from "./markdown";
 import type { IconName } from "./octicons";
 import type { AssistantMessage, ChatMessage, ToolStep } from "./types";
@@ -44,6 +44,11 @@ export function statusText(m: AssistantMessage): string {
   const elapsed = fmtClock(Date.now() - m.ts);
   if (m.stopping) return `正在停止… ${elapsed}`;
   const steps = m.activity?.length || 0;
+  if (m.backend === "local") {
+    if (!m.runStatus || m.runStatus === "FETCHING_REPO") return `正在准备仓库代码… ${elapsed}`;
+    if (steps) return `正在阅读代码 · 已执行 ${steps} 步 · ${elapsed}`;
+    return `正在思考… ${elapsed}`;
+  }
   if (!m.runStatus || m.runStatus === "CREATING") return `正在启动云端环境… ${elapsed}`;
   if (steps) return `正在阅读代码 · 已执行 ${steps} 步 · ${elapsed}`;
   return `Agent 正在思考… ${elapsed}`;
@@ -73,7 +78,7 @@ export function fillAssistant(node: HTMLElement, m: AssistantMessage, opts: Chat
       "div",
       { class: "chat-msg-head" },
       h("span", { class: "chat-avatar" }, icon("sparkle-fill")),
-      h("span", { class: "chat-author" }, "Cursor"),
+      h("span", { class: "chat-author" }, m.backend === "local" ? "助手" : "Cursor"),
       m.model ? h("span", { class: "chat-model", title: "模型" }, m.model) : null,
       h("span", { class: "chat-time", title: fmtDateTime(m.ts) }, fmtTime(m.ts)),
     ),
@@ -109,6 +114,7 @@ export function fillAssistant(node: HTMLElement, m: AssistantMessage, opts: Chat
     const bits: string[] = [];
     if (m.durationMs) bits.push(`用时 ${fmtDuration(m.durationMs)}`);
     if (m.totalTokens) bits.push(`${fmtTokens(m.totalTokens)} tokens`);
+    if (m.costUsd) bits.push(fmtCost(m.costUsd));
     const foot = h("div", { class: "chat-foot" });
     if (m.text) {
       const copy = h(

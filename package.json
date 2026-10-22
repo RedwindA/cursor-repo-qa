@@ -1,8 +1,8 @@
 {
   "name": "cursor-repo-qa",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "在 GitHub 仓库页面提问，由 Cursor Cloud Agent 克隆仓库、阅读代码并回答。",
+  "description": "在 GitHub 仓库页面提问，由 AI agent 阅读仓库代码并回答（自带模型 API 或 Cursor Cloud Agent）。",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -18,7 +18,10 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "dompurify": "^3.4.17",
+    "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
     "marked": "^18.1.1"
   }

@@ -49,9 +49,9 @@ function boot() {
     h(
       "header",
       { class: "app-header" },
-      h("a", { class: "app-logo", href: "#/settings", "aria-label": "Cursor 仓库问答" }, h("img", { src: "icons/icon32.png", width: 32, height: 32, alt: "" })),
-      h("div", { class: "app-crumbs" }, h("span", { class: "app-name" }, "Cursor 仓库问答"), h("span", { class: "app-sep" }, "/"), crumb),
-      h("a", { class: "btn-octicon", href: "https://cursor.com/dashboard", target: "_blank", rel: "noopener noreferrer", title: "打开 Cursor Dashboard", "aria-label": "打开 Cursor Dashboard" }, icon("link-external")),
+      h("a", { class: "app-logo", href: "#/settings", "aria-label": "GitHub 仓库问答" }, h("img", { src: "icons/icon32.png", width: 32, height: 32, alt: "" })),
+      h("div", { class: "app-crumbs" }, h("span", { class: "app-name" }, "GitHub 仓库问答"), h("span", { class: "app-sep" }, "/"), crumb),
+      h("a", { class: "btn-octicon", href: "https://github.com/RedwindA/cursor-repo-qa", target: "_blank", rel: "noopener noreferrer", title: "项目主页", "aria-label": "项目主页" }, icon("mark-github")),
     ),
     h(
       "div",
@@ -63,7 +63,7 @@ function boot() {
           "div",
           { class: "sidebar-profile" },
           h("img", { src: "icons/icon48.png", width: 40, height: 40, alt: "" }),
-          h("div", null, h("div", { class: "sidebar-title" }, "Cursor 仓库问答"), h("div", { class: "f6 color-fg-muted" }, `版本 ${chrome.runtime.getManifest().version}`)),
+          h("div", null, h("div", { class: "sidebar-title" }, "GitHub 仓库问答"), h("div", { class: "f6 color-fg-muted" }, `版本 ${chrome.runtime.getManifest().version}`)),
         ),
         nav,
       ),
@@ -82,7 +82,7 @@ function boot() {
       else a.removeAttribute("aria-current");
     }
     crumb.textContent = TITLES[r.view];
-    document.title = `${TITLES[r.view]} · Cursor 仓库问答`;
+    document.title = `${TITLES[r.view]} · GitHub 仓库问答`;
     document.body.dataset.view = r.view;
 
     if (r.view === "history") {

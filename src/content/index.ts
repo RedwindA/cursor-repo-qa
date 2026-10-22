@@ -1,4 +1,5 @@
-// Cursor 仓库问答 —— GitHub 页面上的浮窗
+// GitHub 仓库问答 —— GitHub 页面上的浮窗
+import { SETTINGS_KEYS } from "../shared/storage";
 import { Panel } from "./panel";
 import { detectRepo } from "./repo";
 import { Session } from "./session";
@@ -44,7 +45,7 @@ if (!window.__cursorRepoQA) {
   setInterval(onLocationChange, 1000);
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && (changes.apiKey || changes.model)) panel?.onSettingsChanged();
+    if (area === "local" && [...SETTINGS_KEYS, "githubToken"].some((k) => k in changes)) panel?.onSettingsChanged();
   });
 
   document.documentElement.appendChild(panel.host);

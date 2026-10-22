@@ -3,8 +3,8 @@ import { fillAssistant, renderChatMessage, statusText, type ChatViewOptions } fr
 import { h, icon, isolateKeys, spinner } from "../shared/dom";
 import { fmtRelative } from "../shared/format";
 import { bindCodeCopy } from "../shared/markdown";
-import { getModelCache, modelLabel, type ModelCache } from "../shared/storage";
-import type { Conversation, ModelInfo, RuntimeResponse } from "../shared/types";
+import { getBackendModel, getModelCache, modelKey, modelLabel, type ModelCache } from "../shared/storage";
+import type { Backend, Conversation, ModelInfo, RuntimeResponse } from "../shared/types";
 import css from "./panel.css?inline";
 import type { CurrentRepo } from "./repo";
 import { extAlive, type Session } from "./session";
@@ -20,6 +20,7 @@ export class Panel {
   private repo: CurrentRepo | null = null;
   private isOpen = sessionStorage.getItem(OPEN_KEY) === "1";
   private maximized = false;
+  private backend: Backend = "local";
   private model = "";
   private modelCache: ModelCache | null = null;
   private rafIdx = new Set<number>();
@@ -27,8 +28,8 @@ export class Panel {
   private rafId = 0;
 
   private wrap = h("div", { class: "qa-root wrap", hidden: true });
-  private fab = h("button", { type: "button", class: "fab", title: "问问这个仓库（Cursor Cloud Agent）", "aria-label": "打开 Cursor 仓库问答" }, icon("comment-discussion"), h("span", { class: "fab-dot" }));
-  private panel = h("section", { class: "panel", role: "dialog", "aria-label": "Cursor 仓库问答", hidden: true });
+  private fab = h("button", { type: "button", class: "fab", title: "问问这个仓库", "aria-label": "打开 GitHub 仓库问答" }, icon("comment-discussion"), h("span", { class: "fab-dot" }));
+  private panel = h("section", { class: "panel", role: "dialog", "aria-label": "仓库问答", hidden: true });
   private titleOwner = h("span", { class: "head-owner" });
   private titleName = h("span", { class: "head-name" });
   private subtitle = h("div", { class: "head-sub" });
@@ -276,14 +277,14 @@ export class Panel {
 
   private async loadModel(): Promise<void> {
     try {
-      const { model } = await chrome.storage.local.get("model");
-      this.model = String(model || "");
-      this.modelCache = await getModelCache();
+      ({ backend: this.backend, model: this.model } = await getBackendModel());
+      this.modelCache = await getModelCache(this.backend);
     } catch {
       this.model = "";
     }
-    this.modelBtn.querySelector("span")!.textContent = modelLabel(this.model, this.modelCache);
-    this.modelBtn.title = `模型：${this.model || "默认（跟随 Cursor 设置）"}。点击切换`;
+    this.modelBtn.querySelector("span")!.textContent = modelLabel(this.model, this.modelCache, this.backend);
+    const fallback = this.backend === "local" ? "未选择" : "默认（跟随 Cursor 设置）";
+    this.modelBtn.title = `模型：${this.model || fallback}。点击切换`;
   }
 
   onChange(repoKey: string, msgIndex?: number): void {
@@ -323,7 +324,7 @@ export class Panel {
 
   refreshFab(): void {
     this.fab.classList.toggle("busy", this.session.busy);
-    this.fab.title = this.session.busy ? "Cursor 正在回答…" : "问问这个仓库（Cursor Cloud Agent）";
+    this.fab.title = this.session.busy ? "正在回答…" : "问问这个仓库";
   }
 
   private refreshComposer(): void {
@@ -358,13 +359,16 @@ export class Panel {
     if (conv.agentUrl) this.btnAgent.href = conv.agentUrl;
 
     let notice: NoticeKind = "";
+    let hasToken = false;
     try {
-      const { apiKey } = await chrome.storage.local.get("apiKey");
-      if (!apiKey) notice = "nokey";
+      const { apiKey, providers, githubToken } = await chrome.storage.local.get(["apiKey", "providers", "githubToken"]);
+      const configured = this.backend === "local" ? Array.isArray(providers) && providers.length > 0 : !!apiKey;
+      if (!configured) notice = "nokey";
+      hasToken = !!githubToken;
     } catch {
       notice = "invalid";
     }
-    if (!notice && repo.isPrivate) notice = "private";
+    if (!notice && repo.isPrivate && !(this.backend === "local" && hasToken)) notice = "private";
     this.renderNotice(notice);
     this.renderMessages(conv);
     this.refreshComposer();
@@ -375,7 +379,9 @@ export class Panel {
     this.noticeEl.className = `flash flash-sm flash-full ${kind === "invalid" ? "flash-error" : "flash-warn"}`;
     if (!kind) return;
     const body = h("div", { class: "flash-body" });
-    if (kind === "nokey") body.append("还没有设置 Cursor API key。", " ", h("button", { type: "button", class: "link-btn", onclick: () => this.openOptions() }, "去设置"));
+    const local = this.backend === "local";
+    if (kind === "nokey") body.append(local ? "还没有配置模型服务。" : "还没有设置 Cursor API key。", " ", h("button", { type: "button", class: "link-btn", onclick: () => this.openOptions() }, "去设置"));
+    else if (kind === "private" && local) body.append("这是私有仓库：需要在设置里填 GitHub token 才能读取代码。", " ", h("button", { type: "button", class: "link-btn", onclick: () => this.openOptions() }, "去设置"));
     else if (kind === "private") body.append("这是私有仓库：Cloud Agent 只能匿名克隆公开仓库，回答很可能会失败。");
     else body.append("扩展已更新或重新加载，请刷新页面。");
     this.noticeEl.replaceChildren(icon("alert"), body);
@@ -403,7 +409,13 @@ export class Panel {
       { class: "blankslate" },
       h("div", { class: "blankslate-icon" }, icon("sparkle-fill-24")),
       h("h3", { class: "blankslate-heading" }, "问问这个仓库"),
-      h("p", { class: "blankslate-desc" }, "Cursor 会在云端克隆仓库、阅读代码后回答。第一次提问需要启动环境，通常要等几十秒。"),
+      h(
+        "p",
+        { class: "blankslate-desc" },
+        this.backend === "local"
+          ? "扩展会下载仓库代码，由你配置的模型阅读代码后回答。"
+          : "Cursor 会在云端克隆仓库、阅读代码后回答。第一次提问需要启动环境，通常要等几十秒。",
+      ),
       h(
         "div",
         { class: "suggestions" },
@@ -550,9 +562,10 @@ export class Panel {
       );
     };
 
-    const list = h("div", { class: "menu-list" }, item("", "默认模型", "跟随 Cursor 里的设置", false));
+    const local = this.backend === "local";
+    const list = h("div", { class: "menu-list" }, local ? null : item("", "默认模型", "跟随 Cursor 里的设置", false));
     if (models) {
-      for (const m of models) list.appendChild(item(m.id, m.displayName, m.displayName === m.id ? "" : m.id));
+      for (const m of models) list.appendChild(item(m.id, m.displayName, m.detail ?? (m.displayName === m.id ? "" : m.id)));
       if (this.model && !models.some((m) => m.id === this.model)) list.appendChild(item(this.model, this.model, "当前设置（已不在列表中）", false));
     }
     if (models && models.length > 8) {
@@ -576,7 +589,7 @@ export class Panel {
     else if (state) parts.push(h("div", { class: "menu-state error" }, icon("alert"), state));
 
     const conv = this.repo ? this.session.get(this.repo.key) : undefined;
-    if (conv?.agentId) {
+    if (conv?.agentId && !local) {
       parts.push(h("div", { class: "menu-divider" }), h("div", { class: "menu-note" }, icon("info"), "云端会话创建后不能换模型。切换后，下一个问题会新开云端会话，并带上最近的对话。"));
     }
     this.modelMenu.replaceChildren(...parts);
@@ -591,9 +604,9 @@ export class Panel {
     if (id === this.model) return;
     if (this.repo) this.session.rememberAgentModel(this.repo.key, this.model);
     this.model = id;
-    this.modelBtn.querySelector("span")!.textContent = modelLabel(id, this.modelCache);
+    this.modelBtn.querySelector("span")!.textContent = modelLabel(id, this.modelCache, this.backend);
     try {
-      await chrome.storage.local.set({ model: id });
+      await chrome.storage.local.set({ [modelKey(this.backend)]: id });
     } catch {
       /* 扩展上下文失效 */
     }

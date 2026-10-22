@@ -2,11 +2,31 @@
 
 export type Language = "zh" | "en" | "auto";
 
+/** local：扩展里跑 agent，调用自己配置的模型 API；cursor：Cursor Cloud Agent */
+export type Backend = "local" | "cursor";
+
+export type ProviderKind = "openai" | "anthropic";
+
+/** 一个模型服务（OpenAI 兼容或 Anthropic 接口） */
+export interface LlmProvider {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  apiKey: string;
+  /** 手动指定的模型 id（服务不支持列出模型时用），留空就自动获取 */
+  models: string[];
+}
+
 export interface Settings {
+  backend: Backend;
   apiKey: string;
   model: string;
   language: Language;
   apiBase: string;
+  providers: LlmProvider[];
+  /** 可选的 GitHub token：读私有仓库、提高 API 限额 */
+  githubToken: string;
 }
 
 export interface RepoRef {
@@ -43,9 +63,13 @@ export interface AssistantMessage {
   error?: string;
   errorCode?: string;
   totalTokens?: number | null;
+  /** 本地 agent：按模型目录价格估算的费用（美元） */
+  costUsd?: number;
   durationMs?: number;
   agentUrl?: string;
   model?: string;
+  /** 回答来自哪个后端（旧记录没有，视为 cursor） */
+  backend?: Backend;
   stopping?: boolean;
 }
 
@@ -97,10 +121,11 @@ export interface RunResult {
   text: string;
   durationMs?: number;
   totalTokens?: number | null;
+  costUsd?: number;
 }
 
 export type PortEvent = { reqId: number } & (
-  | { type: "started"; agentId: string; runId: string; agentUrl: string; model: string; isNewAgent: boolean; recreated: boolean }
+  | { type: "started"; agentId: string; runId: string; agentUrl: string; model: string; backend: Backend; isNewAgent: boolean; recreated: boolean }
   | { type: "event"; event: string; data: Record<string, unknown>; id: string | null }
   | { type: "reset" }
   | ({ type: "done" } & RunResult)
@@ -112,6 +137,8 @@ export type PortEvent = { reqId: number } & (
 export interface ModelInfo {
   id: string;
   displayName: string;
+  /** 菜单里的第二行（本地 agent：服务名 · 模型 id） */
+  detail?: string;
 }
 
 export interface Me {
@@ -123,6 +150,7 @@ export interface Me {
 export type RuntimeRequest =
   | { type: "openOptions"; hash?: string }
   | { type: "testKey"; apiKey?: string }
+  | { type: "testProvider"; provider: LlmProvider }
   | { type: "listModels"; apiKey?: string; /** 允许用缓存（浮窗里用） */ cached?: boolean }
   | { type: "archive"; agentId: string };
 
