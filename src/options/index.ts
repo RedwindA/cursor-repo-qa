@@ -5,6 +5,7 @@ import { isChatKey, listChats } from "../shared/storage";
 import { aboutView } from "./about-view";
 import { HistoryView } from "./history-view";
 import { settingsView } from "./settings-view";
+import { currentVersion, isNewer, latestVersion, REPO_URL } from "./update";
 
 // 尽早设置主题，避免闪烁（脚本在 <head> 里同步执行）
 const dark = matchMedia("(prefers-color-scheme: dark)");
@@ -38,6 +39,13 @@ function boot() {
   const counter = h("span", { class: "Counter", hidden: true });
   const navItems = new Map<ViewName, HTMLAnchorElement>();
 
+  const updateBadge = h("a", { class: "Label Label--attention update-badge", href: "#/about", hidden: true });
+  latestVersion().then((v) => {
+    if (!v || !isNewer(v, currentVersion())) return;
+    updateBadge.textContent = `有新版本 v${v}`;
+    updateBadge.hidden = false;
+  });
+
   const nav = h("nav", { class: "navlist", "aria-label": "设置" });
   for (const n of NAV) {
     const a = h("a", { class: "navlist-item", href: `#/${n.view}` }, icon(n.icon), h("span", { class: "navlist-label" }, n.label), n.view === "history" ? counter : null);
@@ -51,7 +59,7 @@ function boot() {
       { class: "app-header" },
       h("a", { class: "app-logo", href: "#/settings", "aria-label": "GitHub 仓库问答" }, h("img", { src: "icons/icon32.png", width: 32, height: 32, alt: "" })),
       h("div", { class: "app-crumbs" }, h("span", { class: "app-name" }, "GitHub 仓库问答"), h("span", { class: "app-sep" }, "/"), crumb),
-      h("a", { class: "btn-octicon", href: "https://github.com/RedwindA/repo-qa", target: "_blank", rel: "noopener noreferrer", title: "项目主页", "aria-label": "项目主页" }, icon("mark-github")),
+      h("a", { class: "btn-octicon", href: REPO_URL, target: "_blank", rel: "noopener noreferrer", title: "项目主页", "aria-label": "项目主页" }, icon("mark-github")),
     ),
     h(
       "div",
@@ -63,7 +71,7 @@ function boot() {
           "div",
           { class: "sidebar-profile" },
           h("img", { src: "icons/icon48.png", width: 40, height: 40, alt: "" }),
-          h("div", null, h("div", { class: "sidebar-title" }, "GitHub 仓库问答"), h("div", { class: "f6 color-fg-muted" }, `版本 ${chrome.runtime.getManifest().version}`)),
+          h("div", null, h("div", { class: "sidebar-title" }, "GitHub 仓库问答"), h("div", { class: "f6 color-fg-muted" }, `版本 ${currentVersion()}`), updateBadge),
         ),
         nav,
       ),

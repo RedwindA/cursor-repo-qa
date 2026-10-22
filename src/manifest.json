@@ -4,6 +4,7 @@
   "description": "在 GitHub 仓库页面提问，由 AI agent 阅读仓库代码并回答。支持自带模型 API（OpenAI 兼容 / Anthropic）或 Cursor Cloud Agent。",
   "version": "0.0.0",
   "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApyDF2eDFhea/RrVo/GWFvR+dLCbqH+cr599ucSC0FljRds4/FE6ffwWKR3rYNXggLWLd0klR7Xs6JkEQkuorHjuBYwDbihE0RJQUQQAba1hpRLB1Dj+mLarMjWAofVo8mlYttkFUE2E3bUTo4xOO3Qgba9FbsNMRr3pwJ/pe1+ey/nPnl8zU8J9T1qURDNvd6xznQtZmBiD9pDkrzt1Qxn1URGG5w0uLlScUNYWH2D4mqbhdfzy27cKpUPLfksO0JazoAtnVktJr7g+6YxeFLVI0pSzXLex3XeQ/oPw7lJrkh2ho3TkUpkr59uaPHEaqGWABLIRZFCiuHPbcslKnqQIDAQAB",
   "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": ["https://api.cursor.com/*", "https://codeload.github.com/*", "https://api.github.com/*", "https://raw.githubusercontent.com/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],

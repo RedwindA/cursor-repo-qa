@@ -18,6 +18,7 @@
 .color-fg-muted { color: var(--qa-fg-muted); }
 .color-fg-success { color: var(--qa-fg-success); }
 .color-fg-danger { color: var(--qa-fg-danger); }
+.color-fg-attention { color: var(--qa-fg-attention); }
 .f6 { font-size: 12px; }
 .mono { font-family: var(--qa-font-mono); }
 
