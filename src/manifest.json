@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Cursor 仓库问答",
+  "name": "GitHub 仓库问答",
   "description": "在 GitHub 仓库页面提问，由 AI agent 阅读仓库代码并回答。支持自带模型 API（OpenAI 兼容 / Anthropic）或 Cursor Cloud Agent。",
   "version": "0.0.0",
   "minimum_chrome_version": "116",
@@ -11,7 +11,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Cursor 仓库问答 · 设置与聊天记录",
+    "default_title": "GitHub 仓库问答 · 设置与聊天记录",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png"

@@ -1,4 +1,4 @@
-// Cursor 仓库问答 —— GitHub 页面上的浮窗
+// GitHub 仓库问答 —— GitHub 页面上的浮窗
 import { SETTINGS_KEYS } from "../shared/storage";
 import { Panel } from "./panel";
 import { detectRepo } from "./repo";

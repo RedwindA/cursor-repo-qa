@@ -1,4 +1,4 @@
-// Cursor 仓库问答 —— 后台 service worker
+// GitHub 仓库问答 —— 后台 service worker
 // 两个后端：本地 agent（local/，在这里跑 agent 循环，调用自己配置的模型 API），
 // 或 Cursor Cloud Agents API（读取 SSE 流）。结果都按同样的消息格式转发给页面里的浮窗。
 import { getModelCache, getSettings, migrateLegacy, MODEL_CACHE_TTL, modelCacheKey, type ModelCache } from "../shared/storage";

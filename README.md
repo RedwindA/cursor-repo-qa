@@ -1,4 +1,4 @@
-# Cursor 仓库问答（Chrome 扩展）
+# GitHub 仓库问答（Chrome 扩展）
 
 在任意 GitHub 仓库页面右下角点开浮窗提问，由 agent 阅读当前仓库的代码，把回答流式显示在浮窗里。有两种回答方式：
 

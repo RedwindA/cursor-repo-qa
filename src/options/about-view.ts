@@ -34,6 +34,8 @@ export function aboutView(): HTMLElement {
     h(
       "ul",
       { class: "notes" },
+      h("li", null, externalLink("https://github.com/RedwindA/cursor-repo-qa", "项目主页 · 下载新版本")),
+      h("li", null, externalLink("https://github.com/settings/personal-access-tokens/new", "GitHub · 创建 Fine-grained token（读私有仓库用）")),
       h("li", null, externalLink("https://cursor.com/dashboard/api", "Cursor Dashboard · API Keys")),
       h("li", null, externalLink("https://cursor.com/dashboard", "Cursor Dashboard · 用量与账单")),
     ),

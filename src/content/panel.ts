@@ -28,7 +28,7 @@ export class Panel {
   private rafId = 0;
 
   private wrap = h("div", { class: "qa-root wrap", hidden: true });
-  private fab = h("button", { type: "button", class: "fab", title: "问问这个仓库", "aria-label": "打开仓库问答" }, icon("comment-discussion"), h("span", { class: "fab-dot" }));
+  private fab = h("button", { type: "button", class: "fab", title: "问问这个仓库", "aria-label": "打开 GitHub 仓库问答" }, icon("comment-discussion"), h("span", { class: "fab-dot" }));
   private panel = h("section", { class: "panel", role: "dialog", "aria-label": "仓库问答", hidden: true });
   private titleOwner = h("span", { class: "head-owner" });
   private titleName = h("span", { class: "head-name" });
