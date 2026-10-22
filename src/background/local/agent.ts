@@ -20,6 +20,8 @@ export const isLocalId = (id: string | null | undefined) => !!id && id.startsWit
 const MAX_TOOL_CALLS = 40;
 const MAX_SESSIONS = 100;
 const KEEP_FINISHED_MS = 10 * 60 * 1000;
+/** 回答结束后继续保活一段时间，追问时仓库代码还在内存里 */
+const LINGER_MS = 5 * 60 * 1000;
 
 type Out = Parameters<Emit>[0];
 
@@ -47,12 +49,18 @@ const runs = new Map<string, Run>();
 // ---------- service worker 保活 ----------
 
 // 回答时可能长时间只是在等模型输出，期间没有扩展事件，service worker 会被回收。
-// 定期调用一个扩展 API 让它保持活跃，没有进行中的 run 就停掉。
+// 定期调用一个扩展 API 让它保持活跃；回答结束后再保持 LINGER_MS，之后停掉。
 let keepAlive: ReturnType<typeof setInterval> | undefined;
+let lingerUntil = 0;
 function updateKeepAlive(): void {
   const active = [...runs.values()].some((r) => !r.finished);
-  if (active && !keepAlive) keepAlive = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), 20_000);
-  else if (!active && keepAlive) {
+  if (active) lingerUntil = Date.now() + LINGER_MS;
+  if ((active || Date.now() < lingerUntil) && !keepAlive) {
+    keepAlive = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {});
+      updateKeepAlive();
+    }, 20_000);
+  } else if (!active && Date.now() >= lingerUntil && keepAlive) {
     clearInterval(keepAlive);
     keepAlive = undefined;
   }
@@ -211,7 +219,13 @@ async function execute(run: Run, settings: Settings, req: LocalAsk, provider: Ll
   const t0 = Date.now();
   status(run, "FETCHING_REPO");
   const rec = reuse ? await idbGet<SessionRecord>("sessions", run.sessionId).catch(() => undefined) : undefined;
-  const { fs, note } = await openRepo(req.repo, { pageUrl: req.pageUrl, pinnedSha: rec?.sha, token: settings.githubToken, signal });
+  const { fs, note } = await openRepo(req.repo, {
+    pageUrl: req.pageUrl,
+    pinnedSha: rec?.sha,
+    token: settings.githubToken,
+    signal,
+    onDownload: () => status(run, "DOWNLOADING"),
+  });
   signal.throwIfAborted();
   status(run, "RUNNING");
 

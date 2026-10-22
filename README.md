@@ -9,7 +9,7 @@
 
 ## 安装
 
-1. 到 [Releases](https://github.com/RedwindA/cursor-repo-qa/releases/latest) 下载最新的 `cursor-repo-qa-vX.Y.Z.zip` 并解压。
+1. 到 [Releases](https://github.com/RedwindA/repo-qa/releases/latest) 下载最新的 `cursor-repo-qa-vX.Y.Z.zip` 并解压。
 2. Chrome 打开 `chrome://extensions`，打开右上角“开发者模式”。
 3. 点“加载已解压的扩展程序”，选择解压出来的文件夹（里面直接有 `manifest.json`）。
 4. 安装后会自动打开设置页：
@@ -51,7 +51,8 @@ Edge、Brave 等 Chromium 内核浏览器同样适用（需要 Chrome 116 及以
 
 - 公开仓库直接从 `codeload.github.com` 下载 zip，不调用 GitHub API，所以没有未登录每小时 60 次的限额。zip 的注释就是 commit SHA，回答里的代码链接都指向这个 commit。填了 GitHub token 时改走 `api.github.com` 的 zipball。
 - 下载的 zip 按 commit 缓存在扩展的 IndexedDB 里（最多 512 MB，按最近使用淘汰），10 分钟内同一分支、以及同一会话的追问都不会重复下载。不需要手动清理。
-- zip 超过 80 MB 的大仓库退回“远程模式”：目录树用 Git Trees API 获取，文件按需从 `raw.githubusercontent.com` 读取，这时 `grep` 不可用（会占用 GitHub API 限额，建议填 token）。
+- 打开缓存的 zip 时只读目录，文件用到时才解压，所以即使扩展后台被浏览器回收，追问时重新加载也只要几十毫秒。回答结束后后台会再保持 5 分钟，这段时间里追问直接用内存里的代码。
+- zip 超过 80 MB 的大仓库退回“远程模式”：目录树用 Git Trees API 获取，文件按需从 `raw.githubusercontent.com` 读取，这时 `grep` 不可用（会占用 GitHub API 限额，建议填 token）。目录树同样按 commit 缓存，并记住这个仓库太大，7 天内不再尝试下载 zip。
 - 单个文件超过 1 MB 只列出、不读取；一次回答最多 40 次工具调用；上下文太长时会把较早的工具输出替换成占位文字。
 - 回答在扩展的后台进程里运行，刷新页面或关掉浮窗都不会中断，回来后接着显示。会话记录（含工具调用）保存在 IndexedDB，最多保留最近 100 段；点“新会话”会删除旧会话的这份记录（浮窗里的聊天记录不受影响）。
 

@@ -51,7 +51,7 @@ function boot() {
       { class: "app-header" },
       h("a", { class: "app-logo", href: "#/settings", "aria-label": "GitHub 仓库问答" }, h("img", { src: "icons/icon32.png", width: 32, height: 32, alt: "" })),
       h("div", { class: "app-crumbs" }, h("span", { class: "app-name" }, "GitHub 仓库问答"), h("span", { class: "app-sep" }, "/"), crumb),
-      h("a", { class: "btn-octicon", href: "https://github.com/RedwindA/cursor-repo-qa", target: "_blank", rel: "noopener noreferrer", title: "项目主页", "aria-label": "项目主页" }, icon("mark-github")),
+      h("a", { class: "btn-octicon", href: "https://github.com/RedwindA/repo-qa", target: "_blank", rel: "noopener noreferrer", title: "项目主页", "aria-label": "项目主页" }, icon("mark-github")),
     ),
     h(
       "div",
